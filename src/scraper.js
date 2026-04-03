@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import { writeFileSync } from 'fs';
 
 const REAL_USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -71,8 +72,8 @@ async function scrapeFlipkart() {
     });
   });
 
-  console.log('Navigating to Flipkart laptops search...');
-  await page.goto('https://www.flipkart.com/search?q=laptops', {
+  console.log('Navigating to Flipkart search...');
+  await page.goto('https://www.flipkart.com/furniture/pr?sid=wwe&marketplace=FLIPKART', {
     waitUntil: 'domcontentloaded',
     timeout: 30000
   });
@@ -94,24 +95,19 @@ async function scrapeFlipkart() {
     document.querySelectorAll('a[href*="/p/"]').forEach(link => {
       let title = link.textContent?.trim() || '';
       title = title.replace(/Add to Compare|Trending/g, '').trim();
+      title = title.replace(/₹[\d,%]+/g, '').trim();
       
-      if (title.length > 20 && !seenTitles.has(title)) {
+      if (title.length > 10 && !seenTitles.has(title) && !title.match(/^\d+$/)) {
         seenTitles.add(title);
         
         const card = link.closest('div[class*="_"]') || link.parentElement;
-        let price = 'N/A', rating = 'N/A', reviews = 'N/A';
+        let price = 'N/A';
         
         let el = card;
         for (let i = 0; i < 10 && el; i++) {
           const text = el.textContent || '';
           if (el.className && el.className.includes('_30jeq8') && price === 'N/A') {
             price = text.trim();
-          }
-          if (el.className && el.className.includes('_3LWZl') && rating === 'N/A') {
-            rating = text.trim();
-          }
-          if (el.className && el.className.includes('_2R') && reviews === 'N/A') {
-            reviews = text.trim();
           }
           el = el.nextElementSibling || el.firstElementChild;
         }
@@ -122,16 +118,23 @@ async function scrapeFlipkart() {
           price = priceMatch[0];
         }
         
+        const ratingMatch = allText.match(/(\d+\.?\d*)\s*\(\s*[\d,]+\s*\)/);
+        const dimensionsMatch = allText.match(/(\d+\.?\d*\s*(?:inch|cm|mm|ft|m)?\s*[xX×]\s*\d+\.?\d*\s*(?:inch|cm|mm|ft|m)?)/i);
+        const colorMatch = allText.match(/Finish\s*Color\s*[-:]\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)/i);
+        const assembledMatch = allText.match(/(Pre\s*Assembled|DIY|Assembled)/i);
+        
         results.push({
           title: title.substring(0, 80),
           price,
-          rating,
-          reviews
+          dimensions: dimensionsMatch ? dimensionsMatch[0] : null,
+          rating: ratingMatch ? ratingMatch[0] : null,
+          color: colorMatch ? colorMatch[1] : null,
+          assembled: assembledMatch ? assembledMatch[1] : null
         });
       }
     });
     
-    return results.slice(0, 24);
+    return results.slice(0, 40);
   });
 
   console.log(`Found ${products.length} products:`);
@@ -149,6 +152,8 @@ scrapeFlipkart()
   .then(products => {
     console.log('\nScraping completed!');
     console.log(JSON.stringify(products, null, 2));
+    writeFileSync('scraped-data.json', JSON.stringify(products, null, 2));
+    console.log('Data saved to scraped-data.json');
   })
   .catch(err => {
     console.error('Scraping failed:', err);
